@@ -1,0 +1,11 @@
+version: '3'
+services:
+  database:
+    image: "edgedb/edgedb"
+    volumes:
+      - database-data:/var/lib/edgedb/data
+      - /var/run/edgedb:/run/edgedb
+    network_mode: host
+
+volumes:
+  database-data:
