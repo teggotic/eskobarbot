@@ -39,12 +39,14 @@ class User(orm.Model):
 engine = sqlalchemy.create_engine(str(database.url))
 metadata.create_all(engine)
 
-bot_commands = [
+bot_commands = (
     '!icq',
     # '!рулетка',
     # '!принять',
     '!клоун',
-]
+    '!глав_клоун',
+    '!команды',
+)
 
 BLOCKED_SYMBOLS = set('⠭◐⢉⠄⡾▌⠸⡄▐⡀⠑⣾⠲⠙⠁⣈⠾⢚⠿⣸⠹⠇⠘⡹⠴⠀⡻⠷⣉⣌⣮⣴⡇⡈⢹⣿⠋▒█⠈⠃⣰░⡆⡏'
                       '⠉⣜▀⡿⣭⢦⡴⣹⢿⣦⠻⠔⡟⠠⣶⠏⣀⣤⣏⢰⡞⣗⣠⢻⣥⠦⠤⣼⢀▄⣽⢴⢄⢂⠛⣷⠟⢠⢤⣩⣆⣄⠂⣧⡉⢸⣁⣇')
@@ -54,15 +56,20 @@ BAN_BOTS_SYMBOLS = set('𝕁𝗺𝘆𝙇𝙋𝕓𝟘ℙ𝘅𝗞𝙑𝘨𝕥𝘑�
 
 COOLDOWN = 10
 
+COMMADS_COOLDOWN = 60
+
 ROULETTE_TIMEOUT = 60 * 4
 ROULETTE_REQUEST_COOLDOWN = 20 * 1
 ROULETTE_ACCEPT_COOLDOWN = 60 * 1
+
+REPLY_COOLDOWN = 30
 
 
 class Bot(commands.Bot):
     def __init__(self):
         super().__init__(
             irc_token=os.environ['TMI_TOKEN'],
+            api_token=os.environ['API_TOKEN'],
             client_id=os.environ['CLIENT_ID'],
             nick=os.environ['BOT_NICK'],
             prefix=os.environ['BOT_PREFIX'],
@@ -74,6 +81,10 @@ class Bot(commands.Bot):
         self.last_command_time = 0
         self.last_roulette_request_time = 0
         self.last_roulette_accept_time = 0
+        self.last_reply_time = 0
+        self.last_commands_command_time = 0
+
+        self.REPLY_COOLDOWN = REPLY_COOLDOWN
         # self._conn = None
 
     # async def get_conn(self):
@@ -103,6 +114,11 @@ class Bot(commands.Bot):
                                     'channel-points-channel-v1.140883424')
         print(f'Ready | {self.nick}')
 
+    def _get_context(self, channel, author):
+        return twitchio.Context(message=twitchio.Message(),
+                                channel=channel,
+                                user=author)
+
     async def event_raw_pubsub(self, data):
         try:
             if data['type'] == 'MESSAGE':
@@ -113,9 +129,24 @@ class Bot(commands.Bot):
                     user_name = redemption['user']['login'].lower()
 
                     reward = redemption['reward']
+
                     if reward['title'] == '10iq':
                         user = await self.get_or_create_user(user_name)
                         await user.update(iq=user.iq + 10)
+                    elif reward['title'] == 'Забанить кого-то на 10мин.':
+
+                        user_input = redemption['user_input'].strip()
+                        if user_input[0] == '@':
+                            user_input = user_input[1:]
+
+                        author = (await self.get_users(user_name))[0]
+
+                        ctx = self._get_context(
+                            self.get_channel(self.initial_channels[0]),
+                            author)
+
+                        await ctx.timeout(user_input, 600, 'за очки')
+
         except json.decoder.JSONDecodeError:
             pass
 
@@ -141,10 +172,24 @@ class Bot(commands.Bot):
         good = await self.moderate_message(message)
 
         if good:
-            for bot_command in bot_commands:
-                if message.content.startswith(bot_command):
-                    await self.handle_commands(message)
-                    break
+            if message.content.startswith(bot_commands):
+                await self.handle_commands(message)
+
+            else:
+                await self.try_reply(message)
+
+    async def try_reply(self, message: twitchio.Message):
+        if time() - self.last_reply_time < self.REPLY_COOLDOWN:
+            return
+
+        if 'Pog' in message.content:
+            ctx = await self.get_context(message)
+
+            msg = ' '.join(['Pog'] * random.randint(3, 5))
+            await ctx.send(msg)
+            self.last_reply_time = time()
+            self.REPLY_COOLDOWN = random.randint(REPLY_COOLDOWN - 10,
+                                                 REPLY_COOLDOWN + 10)
 
     async def get_or_create_user(self, user_name, **kwargs):
         user = await self.find_user(user_name, **kwargs)
@@ -228,16 +273,34 @@ class Bot(commands.Bot):
         else:
             return word + 'ов'
 
+    @commands.command(name='глав_клоун')
+    async def main_clown_command(self, ctx: twitchio.Context):
+        if time() - self.last_command_time > COOLDOWN:
+            self.last_command_time = time()
+
+            await ctx.send('@kevsen_o')
+        # else:
+        #     time_left = max(0,
+        #                     COOLDOWN - ceil(time() - self.last_command_time))
+        #     await ctx.send(f'кд еще {time_left} сек')
+
     @commands.command(name='клоун')
     async def clown_command(self, ctx: twitchio.Context):
         if time() - self.last_command_time > COOLDOWN:
             self.last_command_time = time()
 
-            await ctx.send('@kevsen_o')
-        else:
-            time_left = max(0,
-                            COOLDOWN - ceil(time() - self.last_command_time))
-            await ctx.send(f'кд еще {time_left} сек')
+            await ctx.send('@DumpOwl')
+
+    @commands.command(name='команды')
+    async def commands_command(self, ctx: twitchio.Context):
+        if time() - self.last_commands_command_time > COMMADS_COOLDOWN:
+            self.last_commands_command_time = time()
+
+            await ctx.send('Команды бота: ' + ', '.join(bot_commands))
+        # else:
+        #     time_left = max(0,
+        #                     COOLDOWN - ceil(time() - self.last_command_time))
+        #     await ctx.send(f'кд еще {time_left} сек')
 
     @commands.command(name='рулетка')
     async def roulette_command(self, ctx: twitchio.Context):
